@@ -11,6 +11,7 @@
 
 namespace OCA\Richdocuments\Controller;
 
+use OCA\Richdocuments\AppInfo\Application;
 use OCA\Richdocuments\Events\BeforeFederationRedirectEvent;
 use OCA\Richdocuments\Service\FederationService;
 use OCA\Richdocuments\TokenManager;
@@ -218,8 +219,26 @@ class DocumentController extends Controller {
 				$response->addHeader('X-Frame-Options', 'ALLOW');
 				return $response;
 			}
+			$templateId = (int)\OC::$server->getConfig()->getUserValue($this->uid, Application::APPNAME, 'template-' . $item->getId(), -1);
+			if ($templateId !== -1) {
+				// TODO: if templateId = 0 -> empty template
+				try {
+					$template = $this->templateManager->get($templateId);
+				} catch (NotFoundException $e) {
+					$userFolder = $this->rootFolder->getUserFolder($this->uid);
+					try {
+						$template = $userFolder->getById($templateId);
+					} catch (NotFoundException $e) {
+						return new TemplateResponse('core', '403', [], 'guest');
+					}
+				}
+				list($urlSrc, $wopi) = $this->tokenManager->getTokenForTemplate($template, $this->uid, $item->getId());
+				$token = $wopi->getToken();
+				\OC::$server->getConfig()->deleteUserValue($this->uid, Application::APPNAME, 'template-' . $item->getId());
+			} else {
+				list($urlSrc, $token, $wopi) = $this->tokenManager->getToken($item->getId());
+			}
 
-			list($urlSrc, $token, $wopi) = $this->tokenManager->getToken($item->getId());
 			$params = [
 				'permissions' => $item->getPermissions(),
 				'title' => $item->getName(),
@@ -580,6 +599,7 @@ class DocumentController extends Controller {
 		}
 
 		if (!$content){
+			// FIXME: see if this is used,
 			$content = file_get_contents(dirname(dirname(__DIR__)) . self::ODT_TEMPLATE_PATH);
 		}
 
