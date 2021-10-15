@@ -92,29 +92,16 @@ class TemplateManager {
 		'presentation' => 'pptx'
 	];
 
-	const EMPTY_TEMPLATE_ID_TYPE = [
-		-1 => 'document',
-		-2 => 'spreadsheet',
-		-3 => 'presentation',
-	];
-	const EMPTY_TEMPLATE_TYPE_ID = [
-		'document'     => -1,
-		'spreadsheet'  => -2,
-		'presentation' => -3,
-	];
-
-
 	/**
 	 * Template manager
 	 *
 	 * @param string $appName
 	 * @param string $userId
 	 * @param IConfig $config
-	 * @param Factory $appDataFactory
+	 * @param IAppData $appData
 	 * @param IURLGenerator $urlGenerator
 	 * @param IRootFolder $rootFolder
 	 * @param IL10N $l
-	 * @throws \OCP\Files\NotPermittedException
 	 */
 	public function __construct($appName,
 								$userId,
@@ -131,12 +118,10 @@ class TemplateManager {
 
 
 		$this->appData = $appData;
-		$this->createAppDataFolders();
-
 		$this->l = $l;
 	}
 
-	private function createAppDataFolders() {
+	private function ensureAppDataFolders() {
 		/*
 		 * Init the appdata folder
 		 * We need an actual folder for the fileid and previews.
@@ -207,7 +192,7 @@ class TemplateManager {
 		});
 	}
 
-	private function getEmpty($type = null) {
+	public function getEmpty($type = null) {
 		$folder = $this->getEmptyTemplateDir();
 
 		$templateFiles = $folder->getDirectoryListing();
@@ -234,6 +219,7 @@ class TemplateManager {
 	 * Remove empty_templates in appdata and recreate it from the apps templates
 	 */
 	public function updateEmptyTemplates() {
+		$this->ensureAppDataFolders();
 		try {
 			$folder = $this->getEmptyTemplateDir();
 			$folder->delete();
@@ -424,6 +410,7 @@ class TemplateManager {
 	 * @return Folder
 	 */
 	private function getSystemTemplateDir() {
+		$this->ensureAppDataFolders();
 		$path = 'appdata_' . $this->config->getSystemValue('instanceid', null) . '/richdocuments/templates';
 		return $this->rootFolder->get($path);
 	}
@@ -432,6 +419,7 @@ class TemplateManager {
 	 * @return Folder
 	 */
 	private function getEmptyTemplateDir() {
+		$this->ensureAppDataFolders();
 		$path = 'appdata_' . $this->config->getSystemValue('instanceid', null) . '/richdocuments/empty_templates';
 		return $this->rootFolder->get($path);
 	}
