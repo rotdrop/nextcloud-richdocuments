@@ -142,6 +142,7 @@ class WopiController extends Controller {
 	 * @NoAdminRequired
 	 * @NoCSRFRequired
 	 * @PublicPage
+         * @UseSession
 	 *
 	 * @param string $fileId
 	 * @param string $access_token
