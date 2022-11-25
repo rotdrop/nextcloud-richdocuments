@@ -20,6 +20,7 @@
  *
  */
 
+import { loadState } from '@nextcloud/initial-state'
 import { getRootUrl } from '@nextcloud/router'
 import { languageToBCP47 } from './index'
 import Config from './../services/config.tsx'
@@ -35,7 +36,8 @@ const getSearchParam = (name) => {
 const getWopiUrl = ({ fileId, title, readOnly, closeButton, revisionHistory }) => {
 	// WOPISrc - URL that loolwsd will access (ie. pointing to ownCloud)
 	// index.php is forced here to avoid different wopi srcs for the same document
-	const wopiurl = window.location.protocol + '//' + window.location.host + getRootUrl() + '/index.php/apps/richdocuments/wopi/files/' + fileId
+	const wopiData = loadState('richdocuments', 'wopiData', '-')
+	const wopiurl = window.location.protocol + '//' + window.location.host + getRootUrl() + '/index.php/apps/richdocuments/wopi/files/' + fileId + '/' + wopiData
 	console.debug('[getWopiUrl] ' + wopiurl)
 	const wopisrc = encodeURIComponent(wopiurl)
 
