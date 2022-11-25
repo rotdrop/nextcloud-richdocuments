@@ -31,6 +31,7 @@ use OCA\Richdocuments\Helper;
 use OCA\Richdocuments\PermissionManager;
 use OCA\Richdocuments\Service\FederationService;
 use OCA\Richdocuments\Service\UserScopeService;
+use OCA\Richdocuments\Service\InitialStateService;
 use OCA\Richdocuments\TemplateManager;
 use OCA\Richdocuments\TokenManager;
 use OCP\AppFramework\Controller;
@@ -39,6 +40,7 @@ use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\AppFramework\Http\StreamResponse;
 use OCP\AppFramework\QueryException;
+use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Constants;
 use OCP\Encryption\IManager as IEncryptionManager;
 use OCP\EventDispatcher\IEventDispatcher;
@@ -66,6 +68,9 @@ use OCP\PreConditionNotMetException;
 use OCP\Share\Exceptions\ShareNotFound;
 use OCP\Share\IManager as IShareManager;
 use OCP\Share\IShare;
+use OCP\Security\ICrypto;
+use OC\Authentication\Token\IProvider as CloudTokenProvider;
+use OC\Authentication\Exceptions\InvalidTokenException as InvalidCloudTokenException;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\NotFoundExceptionInterface;
 
@@ -102,6 +107,12 @@ class WopiController extends Controller {
 	private $groupManager;
 	private ILockManager $lockManager;
 	private IEventDispatcher $eventDispatcher;
+	/** @var ICrypto */
+	private $crypto;
+	/** @var CloudTokenProvider */
+	private $cloudTokenProvider;
+	/** @var ITimeFactory */
+	private $timeFactory;
 
 	// Signifies LOOL that document has been changed externally in this storage
 	const LOOL_STATUS_DOC_CHANGED = 1010;
@@ -127,7 +138,10 @@ class WopiController extends Controller {
 		IEncryptionManager $encryptionManager,
 		IGroupManager $groupManager,
 		ILockManager $lockManager,
-		IEventDispatcher $eventDispatcher
+		IEventDispatcher $eventDispatcher,
+		ICrypto $crypto,
+		CloudTokenProvider $cloudTokenProvider,
+		ITimeFactory $timeFactory,
 	) {
 		parent::__construct($appName, $request);
 		$this->rootFolder = $rootFolder;
@@ -147,6 +161,9 @@ class WopiController extends Controller {
 		$this->groupManager = $groupManager;
 		$this->lockManager = $lockManager;
 		$this->eventDispatcher = $eventDispatcher;
+		$this->crypto = $crypto;
+		$this->cloudTokenProvider = $cloudTokenProvider;
+		$this->timeFactory = $timeFactory;
 	}
 
 	/**
@@ -162,7 +179,8 @@ class WopiController extends Controller {
 	 * @throws InvalidPathException
 	 * @throws NotFoundException
 	 */
-	public function checkFileInfo($fileId, $access_token) {
+	public function checkFileInfo($fileId, $access_token, $wopiData) {
+
 		try {
 
 			list($fileId, , $version) = Helper::parseFileId($fileId);
@@ -172,7 +190,7 @@ class WopiController extends Controller {
 				$this->templateManager->setUserId($wopi->getOwnerUid());
 				$file = $this->templateManager->get($wopi->getFileid());
 			} else {
-				$file = $this->getFileForWopiToken($wopi);
+				$file = $this->getFileForWopiToken($wopi, $wopiData);
 			}
 			if(!($file instanceof File)) {
 				throw new NotFoundException('No valid file found for ' . $fileId);
@@ -331,7 +349,9 @@ class WopiController extends Controller {
 	 * @throws NotPermittedException
 	 */
 	public function getFile($fileId,
-							$access_token) {
+							$access_token,
+							$wopiData) {
+
 		list($fileId, , $version) = Helper::parseFileId($fileId);
 
 		$wopi = $this->wopiMapper->getWopiForToken($access_token);
@@ -352,7 +372,7 @@ class WopiController extends Controller {
 
 		try {
 			/** @var File $file */
-			$file = $this->getFileForWopiToken($wopi);
+			$file = $this->getFileForWopiToken($wopi, $wopiData);
 			\OC_User::setIncognitoMode(true);
 			if ($version !== '0') {
 				$userFolder = $this->rootFolder->getUserFolder($wopi->getOwnerUid());
@@ -396,7 +416,8 @@ class WopiController extends Controller {
 	 * @throws DoesNotExistException
 	 */
 	public function putFile($fileId,
-							$access_token) {
+							$access_token,
+							$wopiData) {
 		list($fileId, ,) = Helper::parseFileId($fileId);
 		$isPutRelative = ($this->request->getHeader('X-WOPI-Override') === 'PUT_RELATIVE');
 
@@ -405,7 +426,11 @@ class WopiController extends Controller {
 			return new JSONResponse([], Http::STATUS_FORBIDDEN);
 		}
 
-		if (!$this->encryptionManager->isEnabled() || $this->isMasterKeyEnabled()) {
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi, $wopiData);
+		$wopiUserId = $wopi->getUserForFileAccess();
+		if ($loginUID == $wopi->getUserForFileAccess()) {
+			$this->userScopeService->setUserScope($wopiUserId, $loginUID, $loginPassword);
+		} elseif (!$this->encryptionManager->isEnabled() || $this->isMasterKeyEnabled()) {
 			// Set the user to register the change under his name
 			$this->userScopeService->setUserScope($wopi->getUserForFileAccess());
 			$this->userScopeService->setFilesystemScope($isPutRelative ? $wopi->getEditorUid() : $wopi->getUserForFileAccess());
@@ -454,7 +479,7 @@ class WopiController extends Controller {
 				$this->rootFolder->newFile($path);
 				$file = $this->rootFolder->get($path);
 			} else {
-				$file = $this->getFileForWopiToken($wopi);
+				$file = $this->getFileForWopiToken($wopi, $wopiData);
 				$wopiHeaderTime = $this->request->getHeader('X-LOOL-WOPI-Timestamp');
 
 				if (!empty($wopiHeaderTime) && $wopiHeaderTime !== Helper::toISO8601($file->getMTime() ?? 0)) {
@@ -514,10 +539,11 @@ class WopiController extends Controller {
 	 *
 	 * @param string $fileId
 	 * @param string $access_token
+	 * @param string $wopiData
 	 * @return JSONResponse
 	 * @throws DoesNotExistException
 	 */
-	public function postFile(string $fileId, string $access_token): JSONResponse {
+	public function postFile(string $fileId, string $access_token, string $wopiData): JSONResponse {
 		try {
 			$wopiOverride = $this->request->getHeader('X-WOPI-Override');
 			$wopiLock = $this->request->getHeader('X-WOPI-Lock');
@@ -556,6 +582,8 @@ class WopiController extends Controller {
 			return new JSONResponse([], Http::STATUS_FORBIDDEN);
 		}
 
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi, $wopiData);
+
 		// Unless the editor is empty (public link) we modify the files as the current editor
 		$editor = $wopi->getEditorUid();
 		if ($editor === null && !$wopi->isRemoteToken()) {
@@ -571,7 +599,7 @@ class WopiController extends Controller {
 				$file = $userFolder->getById($wopi->getTemplateDestination())[0];
 			} else if ($isRenameFile) {
 				// the new file needs to be installed in the current user dir
-				$file = $this->getFileForWopiToken($wopi);
+				$file = $this->getFileForWopiToken($wopi, $wopiData);
 
 				$suggested = $this->request->getHeader('X-WOPI-RequestedName');
 
@@ -603,7 +631,7 @@ class WopiController extends Controller {
 				$path = $this->rootFolder->getNonExistingName($path);
 				$file = $file->move($path);
 			} else {
-				$file = $this->getFileForWopiToken($wopi);
+				$file = $this->getFileForWopiToken($wopi, $wopiData);
 
 				$suggested = $this->request->getHeader('X-WOPI-SuggestedTarget');
 				$suggested = mb_convert_encoding($suggested, 'utf-8', 'utf-7');
@@ -635,7 +663,7 @@ class WopiController extends Controller {
 
 			$content = fopen('php://input', 'rb');
 			// Set the user to register the change under his name
-			$this->userScopeService->setUserScope($wopi->getEditorUid());
+			$this->userScopeService->setUserScope($wopi->getEditorUid(), $loginUID, $loginPassword);
 			$this->userScopeService->setFilesystemScope($wopi->getEditorUid());
 
 			try {
@@ -761,12 +789,48 @@ class WopiController extends Controller {
 	}
 
 	/**
+	 * Try to obtain the login credentials from the supplied extra data
+	 * (second url parameter after the wopi-token). The data should contain a
+	 * token passphrase.
+	 * @param Wopi $wopi
+	 * @param string $wopiData
+	 * @return array
+	 */
+	private function getLoginCredentials(Wopi $wopi, string $wopiData) {
+		$loginUID = null;
+		$loginPassword = null;
+		if ($wopi->getTokenType() == Wopi::TOKEN_TYPE_USER && !empty($wopiData)) {
+			try {
+				$decrypted = InitialStateService::decryptWopiData($this->crypto, $wopiData);
+				$tokenPassword = $decrypted[InitialStateService::WOPI_DATA_TOKEN_KEY];
+				$token = $this->cloudTokenProvider->getToken($tokenPassword);
+
+				$loginUID = $token->getUID();
+				$loginPassword = $this->cloudTokenProvider->getPassword($token, $tokenPassword);
+
+				$expiry = max($token->getLastActivity(), $this->timeFactory->getTime() + 1800);
+				$token->setLastActivity($expiry);
+				$this->cloudTokenProvider->updateToken($token);
+
+				// $this->logger->info('UID ' . $token->getUID() . ' USER ' . $token->getLoginName());
+			} catch (InvalidCloudTokenException $e) {
+				// ignore
+				$this->logger->logException($e, [ 'message' => 'Token not found for ' . $tokenPassword . ' WOPI ' . $wopi->getToken() ]);
+			} catch (\Throwable $t) {
+				// ignore
+				$this->logger->logException($t);
+			}
+		}
+		return [ 'loginUID' => $loginUID, 'loginPassword' => $loginPassword ];
+	}
+
+	/**
 	 * @param Wopi $wopi
 	 * @return File|Folder|Node|null
 	 * @throws NotFoundException
 	 * @throws ShareNotFound
 	 */
-	private function getFileForWopiToken(Wopi $wopi) {
+	private function getFileForWopiToken(Wopi $wopi, ?string $wopiData) {
 		$this->userScopeService->setUserScope($wopi->getEditorUid());
 		if (!empty($wopi->getShare())) {
 			$share = $this->shareManager->getShareByToken($wopi->getShare());
@@ -780,11 +844,14 @@ class WopiController extends Controller {
 			return array_shift($nodes);
 		}
 
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi, $wopiData);
+
 		// Group folders requires an active user to be set in order to apply the proper acl permissions as for anonymous requests it requires share permissions for read access
 		// https://github.com/nextcloud/groupfolders/blob/e281b1e4514cf7ef4fb2513fb8d8e433b1727eb6/lib/Mount/MountProvider.php#L169
-		$this->userScopeService->setUserScope($wopi->getEditorUid());
+		$this->userScopeService->setUserScope($wopi->getEditorUid(), $loginUID, $loginPassword);
 		// Unless the editor is empty (public link) we modify the files as the current editor
 		// TODO: add related share token to the wopi table so we can obtain the
+
 		$userFolder = $this->rootFolder->getUserFolder($wopi->getUserForFileAccess());
 		$files = $userFolder->getById($wopi->getFileid());
 

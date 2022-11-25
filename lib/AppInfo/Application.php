@@ -31,6 +31,8 @@ use OCA\Richdocuments\Listener\BeforeFetchPreviewListener;
 use OCA\Richdocuments\Listener\CSPListener;
 use OCA\Richdocuments\Listener\LoadViewerListener;
 use OCA\Richdocuments\Listener\ShareLinkListener;
+use OCA\Richdocuments\Listener\UserLoggedOutListener;
+use OCP\User\Events\BeforeUserLoggedOutEvent;
 use OCA\Richdocuments\Middleware\WOPIMiddleware;
 use OCA\Richdocuments\Listener\FileCreatedFromTemplateListener;
 use OCA\Richdocuments\PermissionManager;
@@ -74,6 +76,7 @@ class Application extends App implements IBootstrap {
 		$context->registerEventListener(LoadViewer::class, LoadViewerListener::class);
 		$context->registerEventListener(ShareLinkAccessedEvent::class, ShareLinkListener::class);
 		$context->registerEventListener(BeforePreviewFetchedEvent::class, BeforeFetchPreviewListener::class);
+		$context->registerEventListener(BeforeUserLoggedOutEvent::class, UserLoggedOutListener::class);
 	}
 
 	public function boot(IBootContext $context): void {
