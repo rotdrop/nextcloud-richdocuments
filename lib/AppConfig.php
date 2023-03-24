@@ -36,8 +36,8 @@ class AppConfig {
 
 	private array $defaults = [
 		'wopi_url' => '',
-		'timeout' => 15,
-		'preview_conversion_timeout' => 5,
+		'timeout' => 600,
+		'preview_conversion_timeout' => 15,
 		'preview_conversion_max_filesize' => 104857600, // 100 MB
 		'watermark_text' => '{userId}',
 		'watermark_allGroupsList' => [],
