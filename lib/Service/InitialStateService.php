@@ -28,7 +28,11 @@ namespace OCA\Richdocuments\Service;
 use OCA\Richdocuments\AppInfo\Application;
 use OCA\Richdocuments\Db\Wopi;
 use OCP\AppFramework\Services\IInitialState;
+use OCP\Authentication\LoginCredentials\IStore as CredentialsStore;
+use OC\Authentication\Token\IProvider as TokenProvider;
+use OCP\ILogger;
 use OCP\IConfig;
+use OCP\IRequest;
 
 class InitialStateService {
 	/** @var IInitialState */
@@ -43,6 +47,18 @@ class InitialStateService {
 	/** @var string|null */
 	private $userId;
 
+	/** @var ILogger */
+	private $logger;
+
+	/** @var CredentialsStore */
+	private $credentialsStore;
+
+	/** @var TokenProvider */
+	private $tokenProvider;
+
+	/** @var IRequest */
+	private $request;
+
 	/** @var bool */
 	private $hasProvidedCapabilities = false;
 
@@ -50,12 +66,20 @@ class InitialStateService {
 		IInitialState $initialState,
 		CapabilitiesService $capabilitiesService,
 		IConfig $config,
-		$userId
+		$userId,
+		ILogger $logger,
+		CredentialsStore $credentialsStore,
+		TokenProvider $tokenProvider,
+		IRequest $request
 	) {
 		$this->initialState = $initialState;
 		$this->capabilitiesService = $capabilitiesService;
 		$this->config = $config;
 		$this->userId = $userId;
+		$this->logger = $logger;
+		$this->credentialsStore = $credentialsStore;
+		$this->tokenProvider = $tokenProvider;
+		$this->request = $request;
 	}
 
 	public function provideCapabilities(): void {
@@ -87,6 +111,32 @@ class InitialStateService {
 		$this->initialState->provideInitialState('theming-customLogo', ($logoSet ?
 			\OC::$server->getURLGenerator()->getAbsoluteURL(\OC::$server->getThemingDefaults()->getLogo())
 			: false));
+
+		if ($params['authenticated']) {
+			$this->provideWopiCredentials($wopi);
+		}
+	}
+
+	private function provideWopiCredentials(Wopi $wopi) {
+		try {
+			$credentials = $this->credentialsStore->getLoginCredentials();
+			$passphrase = $credentials->getUID() . '@' . $wopi->getToken();
+			try {
+				$token = $this->tokenProvider->getToken($passphrase);
+			} catch (\OC\Authentication\Exceptions\InvalidTokenException $e) {
+				$token = $this->tokenProvider->generateToken(
+					$passphrase,
+					$wopi->getToken(), // $credentials->getUID(),
+					$credentials->getUID(), // $credentials->getLoginName(),
+					$credentials->getPassword(),
+					'wopi_token_' . $wopi->getToken(),
+				);
+			}
+			$token->setLastActivity($wopi->getExpiry()); // this is in the future, but for the moment prevents the cleanup
+			$this->tokenProvider->updateToken($token);
+		} catch (\Throwable $t) {
+			$this->logger->logException($t, [ 'message' => 'NO CREDENTIALS' ]);
+		}
 	}
 
 	public function prepareParams(array $params): array {

@@ -176,6 +176,7 @@ class DirectViewController extends Controller {
 				'urlsrc' => $urlSrc,
 				'path' => $relativePath,
 				'direct' => true,
+				'authenticated' => $item->getMountPoint()->getOption('authenticated', false),
 			];
 
 			return $this->documentTemplateResponse($wopi, $params);
@@ -216,6 +217,7 @@ class DirectViewController extends Controller {
 					'userId' => null,
 					'direct' => true,
 					'directGuest' => empty($direct->getUid()),
+					'authenticated' => $node->getMountPoint()->getOption('authenticated', false),
 				];
 
 				list($urlSrc, $token, $wopi) = $this->tokenManager->getToken($node->getId(), $direct->getShare(), $direct->getUid(), true);

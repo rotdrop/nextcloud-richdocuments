@@ -180,6 +180,7 @@ class DocumentController extends Controller {
 				'token_ttl' => $wopi->getExpiry(),
 				'urlsrc' => $urlSrc,
 				'path' => $folder->getRelativePath($item->getPath()),
+				'authenticated' => $item->getMountPoint()->getOption('authenticated', false),
 			];
 
 			$encryptionManager = \OC::$server->getEncryptionManager();
@@ -243,6 +244,7 @@ class DocumentController extends Controller {
 			'token_ttl' => $wopi->getExpiry(),
 			'urlsrc' => $urlSrc,
 			'path' => $userFolder->getRelativePath($file->getPath()),
+			'authenticated' => $file->getMountPoint()->getOption('authenticated', false),
 		];
 
 		return $this->documentTemplateResponse($wopi, $params);
@@ -292,6 +294,7 @@ class DocumentController extends Controller {
 					'fileId' => $item->getId() . '_' . $this->config->getSystemValue('instanceid'),
 					'path' => '/',
 					'isPublicShare' => true,
+					'authenticated' => $item->getMountPoint()->getOption('authenticated', false),
 				];
 
 				$templateFile = $this->templateManager->getTemplateSource($item->getId());
@@ -371,6 +374,7 @@ class DocumentController extends Controller {
 					'urlsrc' => $urlSrc,
 					'path' => '/',
 					'userId' => $remoteWopi->getEditorUid() ? ($remoteWopi->getEditorUid() . '@' . $remoteServer) : null,
+					'authenticated' => $node->getMountPoint()->getOption('authenticated', false),
 				];
 
 				return $this->documentTemplateResponse($wopi, $params);
