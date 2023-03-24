@@ -33,7 +33,7 @@ class AppConfig {
 
 	private array $defaults = [
 		'wopi_url' => '',
-		'timeout' => 15,
+		'timeout' => 600,
 		'watermark_text' => '{userId}',
 		'watermark_allGroupsList' => [],
 		'watermark_allTagsList' => [],
