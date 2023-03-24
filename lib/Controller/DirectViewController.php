@@ -180,7 +180,8 @@ class DirectViewController extends Controller {
 				'direct' => true,
 			];
 
-			$this->initialState->provideDocument($wopi);
+			$authenticated = $item->getMountPoint()->getOption('authenticated', false);
+			$this->initialState->provideDocument($wopi, $authenticated);
 			$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 			$this->applyPolicies($response);
 			return $response;
@@ -233,7 +234,8 @@ class DirectViewController extends Controller {
 				$params['token_ttl'] = $wopi->getExpiry();
 				$params['urlsrc'] = $urlSrc;
 
-				$this->initialState->provideDocument($wopi);
+				$authenticated = $item->getMountPoint()->getOption('authenticated', false);
+ 				$this->initialState->provideDocument($wopi, $authenticated);
 				$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 				$this->applyPolicies($response);
 				return $response;

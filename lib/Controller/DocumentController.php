@@ -196,7 +196,8 @@ class DocumentController extends Controller {
 				$encryptionManager->getEncryptionModule()->update($absPath, $owner, $accessList);
 			}
 
-			$this->initialState->provideDocument($wopi);
+			$authenticated = $item->getMountPoint()->getOption('authenticated', false);
+			$this->initialState->provideDocument($wopi, $authenticated);
 			$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 			$this->applyPolicies($response);
 			return $response;
@@ -255,7 +256,8 @@ class DocumentController extends Controller {
 			'userId' => $this->uid
 		];
 
-		$this->initialState->provideDocument($wopi);
+		$authenticated = $file->getMountPoint()->getOption('authenticated', false);
+		$this->initialState->provideDocument($wopi, $authenticated);
 		$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 		$this->applyPolicies($response);
 		return $response;
@@ -321,7 +323,8 @@ class DocumentController extends Controller {
 				$params['urlsrc'] = $urlSrc;
 				$params['hideCloseButton'] = $node instanceof File && $wopi->getHideDownload();
 
-				$this->initialState->provideDocument($wopi);
+				$authenticated = $item->getMountPoint()->getOption('authenticated', false);
+				$this->initialState->provideDocument($wopi, $authenticated);
 				$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 				$this->applyPolicies($response);
 				return $response;
@@ -394,7 +397,8 @@ class DocumentController extends Controller {
 					'userId' => $remoteWopi->getEditorUid() ? ($remoteWopi->getEditorUid() . '@' . $remoteServer) : null,
 				];
 
-				$this->initialState->provideDocument($wopi);
+				$authenticated = $node->getMountPoint()->getOption('authenticated', false);
+				$this->initialState->provideDocument($wopi, $authenticated);
 				$response = new TemplateResponse('richdocuments', 'documents', $params, 'base');
 				$this->applyPolicies($response);
 				return $response;

@@ -27,6 +27,7 @@ use OC\BackgroundJob\TimedJob;
 use OCA\Richdocuments\Db\WopiMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
+use OC\Authentication\Token\IProvider as TokenProvider;
 
 class Cleanup extends TimedJob {
 
@@ -34,10 +35,13 @@ class Cleanup extends TimedJob {
 	private $db;
 	/** @var WopiMapper $wopiMapper */
 	private $wopiMapper;
+	/** @var TokenProvider */
+	private $tokenProvider;
 
-	public function __construct(IDBConnection $db, WopiMapper $wopiMapper) {
+	public function __construct(IDBConnection $db, WopiMapper $wopiMapper, TokenProvider $tokenProvider) {
 		$this->db = $db;
 		$this->wopiMapper = $wopiMapper;
+		$this->tokenProvider = $tokenProvider;
 
 		$this->setInterval(60 * 60);
 	}
@@ -59,5 +63,12 @@ class Cleanup extends TimedJob {
 		$query->delete('richdocuments_wopi')
 			->where($query->expr()->in('id', $query->createNamedParameter($tokenIds, IQueryBuilder::PARAM_INT_ARRAY)));
 		$query->executeStatement();
+		foreach ($tokenIds as $wopiId) {
+			$authTokens = $this->tokenProvider->getTokenByUser($wopiId);
+			foreach ($authTokens as $authToken) {
+				\OC::$server->get(\OCP\ILogger::class)->info('DELETING AUTH TOKEN FOR ' . $wopiId . ' ' . $authToken->getId());
+				$this->tokenProvider->invalidateTokenById($wopiId, $authToken->getId());
+			}
+		}
 	}
 }
