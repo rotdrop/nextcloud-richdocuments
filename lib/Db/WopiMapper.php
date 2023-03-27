@@ -190,4 +190,21 @@ class WopiMapper extends QBMapper {
 
 		return array_column($qb->executeQuery()->fetchAll(), 'id');
 	}
+
+	/**
+	 * @param int|null $limit
+	 * @param int|null $offset
+	 * @return int[]
+	 * @throws \OCP\DB\Exception
+	 */
+	public function getExpiredTokens(?int $limit = null, ?int $offset = null): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('token')
+			->from('richdocuments_wopi')
+			->where($qb->expr()->lt('expiry', $qb->createNamedParameter(time() - 60, IQueryBuilder::PARAM_INT)))
+			->setFirstResult($offset)
+			->setMaxResults($limit);
+
+		return array_column($qb->executeQuery()->fetchAll(), 'token');
+	}
 }
