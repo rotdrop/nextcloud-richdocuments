@@ -129,6 +129,7 @@ class InitialStateService {
 				);
 			}
 			$token->setLastActivity($wopi->getExpiry()); // this is in the future, but for the moment prevents the cleanup
+			$token->setExpiry($wopi->getExpiry()); // the WOPI expiry is static and never updated
 			$this->tokenProvider->updateToken($token);
 		} catch (\Throwable $t) {
 			$this->logger->logException($t, [ 'message' => 'NO CREDENTIALS' ]);
