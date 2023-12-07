@@ -27,21 +27,26 @@ use OC\BackgroundJob\TimedJob;
 use OCA\Richdocuments\Db\WopiMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
+use OC\Authentication\Token\IProvider as TokenProvider;
 
 class Cleanup extends TimedJob {
 	/** @var IDBConnection */
 	private $db;
 	/** @var WopiMapper $wopiMapper */
 	private $wopiMapper;
+	/** @var TokenProvider */
+	private $tokenProvider;
 
-	public function __construct(IDBConnection $db, WopiMapper $wopiMapper) {
+	public function __construct(IDBConnection $db, WopiMapper $wopiMapper, TokenProvider $tokenProvider) {
 		$this->db = $db;
 		$this->wopiMapper = $wopiMapper;
+		$this->tokenProvider = $tokenProvider;
 
-		$this->setInterval(60 * 60);
+		$this->setInterval(60 * 10);
 	}
 
 	protected function run($argument) {
+		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__);
 		// Expire template mappings for file creation
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_template')
@@ -53,10 +58,18 @@ class Cleanup extends TimedJob {
 	}
 
 	private function cleanUpWopiTokens() {
-		$tokenIds = $this->wopiMapper->getExpiredTokenIds(1000);
+		$tokens = $this->wopiMapper->getExpiredTokens(1000);
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_wopi')
-			->where($query->expr()->in('id', $query->createNamedParameter($tokenIds, IQueryBuilder::PARAM_INT_ARRAY)));
+			->where($query->expr()->in('token', $query->createNamedParameter($tokens, IQueryBuilder::PARAM_INT_ARRAY)));
 		$query->executeStatement();
+		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__ . ': #EXPIRED: ' . count($tokens));
+		foreach ($tokens as $wopiToken) {
+			$authTokens = $this->tokenProvider->getTokenByUser($wopiToken);
+			foreach ($authTokens as $authToken) {
+				\OC::$server->get(\OCP\ILogger::class)->info('DELETING AUTH TOKEN FOR ' . $wopiToken . ' ' . $authToken->getId());
+				$this->tokenProvider->invalidateTokenById($wopiToken, $authToken->getId());
+			}
+		}
 	}
 }
