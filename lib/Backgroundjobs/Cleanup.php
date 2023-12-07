@@ -11,6 +11,7 @@ use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\BackgroundJob\TimedJob;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
+use OC\Authentication\Token\IProvider as TokenProvider;
 
 class Cleanup extends TimedJob {
 	private const EXPIRY_GRACE_PERIOD_SECONDS = 60;
@@ -18,14 +19,17 @@ class Cleanup extends TimedJob {
 	public function __construct(
 		ITimeFactory $time,
 		private IDBConnection $db,
+		private WopiMapper $wopiMapper,
+		private TokenProvider $tokenProvider,
 	) {
 		parent::__construct($time);
 
-		$this->setInterval(60 * 60);
+		$this->setInterval(60 * 10);
 	}
 
 	#[\Override]
 	protected function run($argument) {
+		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__);
 		// Expire template mappings for file creation
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_template')
@@ -37,9 +41,21 @@ class Cleanup extends TimedJob {
 	}
 
 	private function cleanUpWopiTokens() {
+		// $query = $this->db->getQueryBuilder();
+		// $query->delete('richdocuments_wopi')
+		// 	->where($query->expr()->lt('expiry', $query->createNamedParameter(time() - self::EXPIRY_GRACE_PERIOD_SECONDS, IQueryBuilder::PARAM_INT)));
+		$tokens = $this->wopiMapper->getExpiredTokens(1000);
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_wopi')
-			->where($query->expr()->lt('expiry', $query->createNamedParameter(time() - self::EXPIRY_GRACE_PERIOD_SECONDS, IQueryBuilder::PARAM_INT)));
+			->where($query->expr()->in('token', $query->createNamedParameter($tokens, IQueryBuilder::PARAM_INT_ARRAY)));
 		$query->executeStatement();
+		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__ . ': #EXPIRED: ' . count($tokens));
+		foreach ($tokens as $wopiToken) {
+			$authTokens = $this->tokenProvider->getTokenByUser($wopiToken);
+			foreach ($authTokens as $authToken) {
+				\OC::$server->get(\OCP\ILogger::class)->info('DELETING AUTH TOKEN FOR ' . $wopiToken . ' ' . $authToken->getId());
+				$this->tokenProvider->invalidateTokenById($wopiToken, $authToken->getId());
+			}
+		}
 	}
 }
