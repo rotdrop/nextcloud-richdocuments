@@ -42,6 +42,7 @@ use OCP\AppFramework\Http;
 use OCP\AppFramework\Http\JSONResponse;
 use OCP\AppFramework\Http\StreamResponse;
 use OCP\AppFramework\QueryException;
+use OCP\AppFramework\Utility\ITimeFactory;
 use OCP\Constants;
 use OCP\Encryption\IManager as IEncryptionManager;
 use OCP\EventDispatcher\IEventDispatcher;
@@ -68,6 +69,8 @@ use OCP\PreConditionNotMetException;
 use OCP\Share\Exceptions\ShareNotFound;
 use OCP\Share\IManager as IShareManager;
 use OCP\Share\IShare;
+use OC\Authentication\Token\IProvider as CloudTokenProvider;
+use OC\Authentication\Exceptions\InvalidTokenException as InvalidCloudTokenException;
 use Psr\Container\ContainerExceptionInterface;
 use Psr\Container\NotFoundExceptionInterface;
 use Psr\Log\LoggerInterface;
@@ -98,7 +101,9 @@ class WopiController extends Controller {
 		private IEncryptionManager $encryptionManager,
 		private IGroupManager $groupManager,
 		private ILockManager $lockManager,
-		private IEventDispatcher $eventDispatcher
+		private IEventDispatcher $eventDispatcher,
+		private CloudTokenProvider $cloudTokenProvider,
+		private ITimeFactory $timeFactory,
 	) {
 		parent::__construct($appName, $request);
 	}
@@ -431,7 +436,11 @@ class WopiController extends Controller {
 			return new JSONResponse([], Http::STATUS_FORBIDDEN);
 		}
 
-		if (!$this->encryptionManager->isEnabled() || $this->isMasterKeyEnabled()) {
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi);
+		$wopiUserId = $wopi->getUserForFileAccess();
+		if ($loginUID == $wopi->getUserForFileAccess()) {
+			$this->userScopeService->setUserScope($wopiUserId, $loginUID, $loginPassword);
+		} elseif (!$this->encryptionManager->isEnabled() || $this->isMasterKeyEnabled()) {
 			// Set the user to register the change under his name
 			$this->userScopeService->setUserScope($wopi->getEditorUid());
 			$this->userScopeService->setFilesystemScope($isPutRelative ? $wopi->getEditorUid() : $wopi->getUserForFileAccess());
@@ -585,6 +594,8 @@ class WopiController extends Controller {
 			return new JSONResponse([], Http::STATUS_FORBIDDEN);
 		}
 
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi);
+
 		// Unless the editor is empty (public link) we modify the files as the current editor
 		$editor = $wopi->getEditorUid();
 		if ($editor === null && !$wopi->isRemoteToken()) {
@@ -668,7 +679,7 @@ class WopiController extends Controller {
 
 			$content = fopen('php://input', 'rb');
 			// Set the user to register the change under his name
-			$this->userScopeService->setUserScope($wopi->getEditorUid());
+			$this->userScopeService->setUserScope($wopi->getEditorUid(), $loginUID, $loginPassword);
 			$this->userScopeService->setFilesystemScope($wopi->getEditorUid());
 
 			try {
@@ -807,6 +818,38 @@ class WopiController extends Controller {
 	}
 
 	/**
+	 * Try to obtain the login credentials from the supplied extra data
+	 * (second url parameter after the wopi-token). The data should contain a
+	 * token passphrase.
+	 * @param Wopi $wopi
+	 * @return array
+	 */
+	private function getLoginCredentials(Wopi $wopi) {
+		$loginUID = null;
+		$loginPassword = null;
+		if ($wopi->getTokenType() == Wopi::TOKEN_TYPE_USER) {
+			try {
+				$tokenPassword = $wopi->getEditorUid() . '@' . $wopi->getToken();
+				$token = $this->cloudTokenProvider->getToken($tokenPassword);
+
+				$loginUID = $token->getLoginName(); //  $token->getUID();
+				$loginPassword = $this->cloudTokenProvider->getPassword($token, $tokenPassword);
+
+				$expiry = max($token->getLastActivity(), $this->timeFactory->getTime() + 1800);
+				$token->setLastActivity($expiry);
+				$this->cloudTokenProvider->updateToken($token);
+			} catch (InvalidCloudTokenException $e) {
+				// ignore
+				$this->logger->logException($e, [ 'message' => 'Token not found for ' . $tokenPassword . ' WOPI ' . $wopi->getToken() ]);
+			} catch (\Throwable $t) {
+				// ignore
+				$this->logger->logException($t);
+			}
+		}
+		return [ 'loginUID' => $loginUID, 'loginPassword' => $loginPassword ];
+	}
+
+	/**
 	 * @param Wopi $wopi
 	 * @return File|Folder|Node|null
 	 * @throws NotFoundException
@@ -825,9 +868,11 @@ class WopiController extends Controller {
 			return array_shift($nodes);
 		}
 
+		list('loginUID' => $loginUID, 'loginPassword' => $loginPassword) = $this->getLoginCredentials($wopi);
+
 		// Group folders requires an active user to be set in order to apply the proper acl permissions as for anonymous requests it requires share permissions for read access
 		// https://github.com/nextcloud/groupfolders/blob/e281b1e4514cf7ef4fb2513fb8d8e433b1727eb6/lib/Mount/MountProvider.php#L169
-		$this->userScopeService->setUserScope($wopi->getEditorUid());
+		$this->userScopeService->setUserScope($wopi->getEditorUid(), $loginUID, $loginPassword);
 		// Unless the editor is empty (public link) we modify the files as the current editor
 		// TODO: add related share token to the wopi table so we can obtain the
 		$userFolder = $this->rootFolder->getUserFolder($wopi->getUserForFileAccess());

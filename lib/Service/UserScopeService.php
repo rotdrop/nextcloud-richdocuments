@@ -39,11 +39,25 @@ class UserScopeService {
 	 * Set a valid user in IUserSession since lots of server logic is relying on obtaining
 	 * the current acting user from that
 	 *
+	 * @param $uid
+	 * @param $loginUid
+	 * @param $loginPassword
 	 * @throws InvalidArgumentException
 	 */
-	public function setUserScope(?string $uid = null): void {
+	public function setUserScope(?string $uid = null, ?string $loginUid = null, ?string $loginPassword = null): void {
 		if ($uid === null) {
 			return;
+		}
+
+		// initialize a dummy memory session -- it also works without but at the cost of an error message
+		// $session = new \OC\Session\Memory('');
+		// $cryptoWrapper = \OC::$server->getSessionCryptoWrapper();
+		// $session = $cryptoWrapper->wrapSession($session);
+		// \OC::$server->setSession($session);
+
+		if (!empty($loginPassword) && $loginUid == $uid) {
+			$this->userSession->login($loginUid, $loginPassword);
+			return; // setUser() already done by login
 		}
 
 		$user = $this->userManager->get($uid);

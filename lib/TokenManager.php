@@ -41,6 +41,9 @@ use OCP\Share\Exceptions\ShareNotFound;
 use OCP\Share\IManager;
 use OCP\Share\IShare;
 use OCP\Util;
+use OCP\Authentication\LoginCredentials\IStore as CredentialsStore;
+use OC\Authentication\Token\IProvider as AuthTokenProvider;
+use Psr\Log\LoggerInterface;
 
 class TokenManager {
 	/** @var IRootFolder */
@@ -74,7 +77,10 @@ class TokenManager {
 		WopiMapper $wopiMapper,
 		IL10N $trans,
 		Helper $helper,
-		PermissionManager $permissionManager
+		PermissionManager $permissionManager,
+		private CredentialsStore $credentialsStore,
+		private AuthTokenProvider $tokenProvider,
+		private LoggerInterface $logger,
 	) {
 		$this->rootFolder = $rootFolder;
 		$this->shareManager = $shareManager;
@@ -200,7 +206,13 @@ class TokenManager {
 
 		$serverHost = $this->urlGenerator->getAbsoluteURL('/');
 		$guestName = $this->userId === null ? $this->prepareGuestName($this->helper->getGuestNameFromCookie()) : null;
-		return $this->wopiMapper->generateFileToken($fileId, $owneruid, $editoruid, $version, $updatable, $serverHost, $guestName, 0, $hideDownload, $direct, 0, $shareToken);
+		$wopi = $this->wopiMapper->generateFileToken($fileId, $owneruid, $editoruid, $version, $updatable, $serverHost, $guestName, 0, $hideDownload, $direct, 0, $shareToken);
+
+		if ($file->getMountPoint()->getOption('authenticated', false)) {
+			$this->provideWopiCredentials($wopi, $editoruid);
+		}
+
+		return $wopi;
 	}
 
 	/**
@@ -261,7 +273,13 @@ class TokenManager {
 		}
 
 		// Legacy way of creating new documents from a template
-		return $this->wopiMapper->generateFileToken($templateFile->getId(), $owneruid, $editoruid, 0, $updatable, $serverHost, null, $targetFile->getId(), $direct);
+		$wopi = $this->wopiMapper->generateFileToken($templateFile->getId(), $owneruid, $editoruid, 0, $updatable, $serverHost, null, $targetFile->getId(), $direct);
+
+		if ($targetFile->getMountPoint()->getOption('authenticated', false)) {
+			$this->provideWopiCredentials($wopi, $editoruid);
+		}
+
+		return $wopi;
 	}
 
 	public function newInitiatorToken($sourceServer, ?Node $node = null, $shareToken = null, bool $direct = false, $userId = null): Wopi {
@@ -324,5 +342,34 @@ class TokenManager {
 
 	public function getUrlSrc(File $file): string {
 		return $this->wopiParser->getUrlSrcValue($file->getMimeType());
+	}
+
+	private function provideWopiCredentials(Wopi $wopi, ?string $editorUid) {
+		try {
+			$credentials = $this->credentialsStore->getLoginCredentials();
+			$loginUid = $credentials->getUID();
+			if ($loginUid !== $editorUid) {
+				$this->logger->error('UID MISMATCH ' . $loginUid  . ' <-> ' . $editorUid);
+				return;
+			}
+			$passphrase = $credentials->getUID() . '@' . $wopi->getToken();
+			try {
+				$token = $this->tokenProvider->getToken($passphrase);
+			} catch (\OC\Authentication\Exceptions\InvalidTokenException $e) {
+				$token = $this->tokenProvider->generateToken(
+					$passphrase,
+					$wopi->getToken(), // $credentials->getUID(),
+					$credentials->getUID(), // $credentials->getLoginName(),
+					$credentials->getPassword(),
+					'wopi_token_' . $wopi->getToken(),
+				);
+			}
+			$token->setLastActivity($wopi->getExpiry()); // this is in the future, but for the moment prevents the cleanup
+			$token->setExpires($wopi->getExpiry()); // the WOPI expiry is static and never updated
+			$this->tokenProvider->updateToken($token);
+			$this->logger->info('WOPI CREDENTIALS GENERATED OR UPDATED FOR ' . $passphrase);
+		} catch (\Throwable $t) {
+			$this->logger->error('NO CREDENTIALS', [ 'exception' => $t ]);
+		}
 	}
 }
