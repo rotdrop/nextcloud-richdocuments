@@ -29,6 +29,7 @@ class Cleanup extends TimedJob {
 
 	#[\Override]
 	protected function run($argument) {
+		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__);
 		// Expire template mappings for file creation
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_template')
