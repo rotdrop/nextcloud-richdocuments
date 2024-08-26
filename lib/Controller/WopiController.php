@@ -1036,10 +1036,10 @@ class WopiController extends Controller {
 				$this->cloudTokenProvider->updateToken($token);
 			} catch (InvalidCloudTokenException $e) {
 				// ignore
-				$this->logger->debug('Token not found for ' . $tokenPassword . ' WOPI ' . $wopi->getToken(), ['exception' => $e]);
+				$this->logger->error('Token not found for ' . $tokenPassword . ' WOPI ' . $wopi->getToken(), ['exception' => $e]);
 			} catch (\Throwable $t) {
 				// ignore
-				$this->logger->debug('Unexpected error obtaining login credentials: ' . $t->getMessage(), ['exception' => $t]);
+				$this->logger->error('Unexpected error obtaining login credentials: ' . $t->getMessage(), ['exception' => $t]);
 			}
 		}
 		return [ 'loginUID' => $loginUID, 'loginPassword' => $loginPassword ];
