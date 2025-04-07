@@ -26,7 +26,6 @@ class Cleanup extends TimedJob {
 	}
 
 	protected function run($argument) {
-		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__);
 		// Expire template mappings for file creation
 		$query = $this->db->getQueryBuilder();
 		$query->delete('richdocuments_template')
@@ -43,11 +42,9 @@ class Cleanup extends TimedJob {
 		$query->delete('richdocuments_wopi')
 			->where($query->expr()->in('token', $query->createNamedParameter($tokens, IQueryBuilder::PARAM_INT_ARRAY)));
 		$query->executeStatement();
-		\OC::$server->get(\OCP\ILogger::class)->info(__METHOD__ . ': #EXPIRED: ' . count($tokens));
 		foreach ($tokens as $wopiToken) {
 			$authTokens = $this->tokenProvider->getTokenByUser($wopiToken);
 			foreach ($authTokens as $authToken) {
-				\OC::$server->get(\OCP\ILogger::class)->info('DELETING AUTH TOKEN FOR ' . $wopiToken . ' ' . $authToken->getId());
 				$this->tokenProvider->invalidateTokenById($wopiToken, $authToken->getId());
 			}
 		}
