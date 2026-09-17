@@ -13,6 +13,8 @@ use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 use OC\Authentication\Token\IProvider as TokenProvider;
 
+use OCA\Richdocuments\Db\WopiMapper;
+
 class Cleanup extends TimedJob {
 	private const EXPIRY_GRACE_PERIOD_SECONDS = 60;
 
