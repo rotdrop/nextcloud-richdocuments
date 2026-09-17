@@ -11,6 +11,8 @@ use OCP\BackgroundJob\TimedJob;
 use OCP\DB\QueryBuilder\IQueryBuilder;
 use OCP\IDBConnection;
 
+use OCA\Richdocuments\Db\WopiMapper;
+
 class Cleanup extends TimedJob {
 	private const EXPIRY_GRACE_PERIOD_SECONDS = 60;
 
